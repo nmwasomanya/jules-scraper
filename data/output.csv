@@ -1,0 +1,13 @@
+Website,Company,Industry,Extracted Emails,Facebook Links
+w3.org,W3C,Standards,,
+python.org,Python,Tech,,
+example.com,Example Corp,Tech,,
+http://localhost:8000,Local Test,Testing,contact@localtest.com,https://facebook.com/localtestpage
+http://localhost:8000,Local Test,Testing,sales@localtest.com,https://facebook.com/localtestpage
+http://google.com,Google,Tech,,
+python.org,Python,Tech,,
+example.com,Example Corp,Tech,,
+w3.org,W3C,Standards,,
+http://google.com,Google,Tech,,
+http://localhost:8000,Local Test,Testing,contact@localtest.com,https://facebook.com/localtestpage
+http://localhost:8000,Local Test,Testing,sales@localtest.com,https://facebook.com/localtestpage

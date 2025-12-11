@@ -1,0 +1,9 @@
+Website,Company,Industry
+example.com,Example Corp,Tech
+http://google.com,Google,Tech
+test.edu,University of Test,Education
+gov-site.gov,Gov Dept,Government
+python.org,Python,Tech
+http://non-existent-site-12345.com,Fake Site,None
+w3.org,W3C,Standards
+http://localhost:8000,Local Test,Testing

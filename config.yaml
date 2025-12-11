@@ -1,0 +1,23 @@
+# Scraper Configuration
+
+# Network Settings
+max_concurrent_requests: 5
+request_timeout: 5  # Short timeout for testing
+delay_between_requests_min: 0.1
+delay_between_requests_max: 0.5
+max_retries_per_url: 1
+
+# Input/Output
+input_file: "data/test_data.csv"
+output_file: "data/output.csv"
+error_log: "logs/error.log"
+filtered_items_log: "logs/filtered_items.log"
+checkpoint_file: "data/checkpoint.json"
+
+# Parsing
+user_agent_rotation: true
+verify_ssl: false
+save_frequency: 2
+
+# Facebook specific
+facebook_explode_rows: false

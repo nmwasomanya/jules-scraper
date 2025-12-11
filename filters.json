@@ -1,0 +1,17 @@
+{
+  "skip_domain_extensions": [".edu", ".gov"],
+  "skip_email_prefixes": [
+    "privacy@", "noreply@", "no-reply@", "donotreply@", "unsubscribe@",
+    "abuse@", "postmaster@", "mailer-daemon@", "webmaster@", "admin@",
+    "support@", "help@", "info@"
+  ],
+  "skip_email_domains": [
+    "email.com", "company.com", "mysite.info", "example.com",
+    "example.org", "test.com", "domain.com", "yourcompany.com",
+    "yourdomain.com", "website.com", "site.com", "business.com",
+    "godaddy.com", "wix.com", "wordpress.com"
+  ],
+  "skip_email_patterns": [
+    "yourname@", "username@", "name@", "user@", "firstname.lastname@"
+  ]
+}
