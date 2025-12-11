@@ -10,29 +10,63 @@ class TestHandler(http.server.SimpleHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-type', 'text/html')
         self.end_headers()
-        html = """
-        <html>
-        <head><title>Test Page</title></head>
-        <body>
-            <h1>Welcome to Test Page</h1>
-            <p>Here are some emails:</p>
-            <ul>
-                <li>contact@localtest.com</li>
-                <li>support@localtest.com</li>
-                <li><a href="mailto:sales@localtest.com">Sales</a></li>
-            </ul>
-            <p>And some bad ones:</p>
-            <ul>
-                <li>admin@test.edu (should be skipped by email filter if it were a domain, but here it is content)</li>
-                <li>privacy@localtest.com (should be skipped by prefix)</li>
-            </ul>
 
-            <p>Socials:</p>
-            <a href="https://facebook.com/localtestpage">Facebook</a>
-            <a href="https://twitter.com/localtestpage">Twitter</a>
-        </body>
-        </html>
-        """
+        if self.path == '/':
+            html = """
+            <html>
+            <head><title>Home Page</title></head>
+            <body>
+                <h1>Home Page</h1>
+                <p>No emails here, but check our contact page.</p>
+                <a href="/contact">Contact Us</a>
+                <a href="/book">Book Now</a>
+                <a href="/about-us">About Us</a>
+            </body>
+            </html>
+            """
+        elif self.path == '/contact':
+            html = """
+            <html>
+            <body>
+                <h1>Contact Page</h1>
+                <p>Email us at: contact@localtest.com</p>
+                <a href="https://facebook.com/localtestpage">Facebook</a>
+            </body>
+            </html>
+            """
+        elif self.path == '/book':
+            html = """
+            <html>
+            <body>
+                <h1>Booking</h1>
+                <p>Book with us:</p>
+                <a href="https://square.site/book/123/myshop">Book on Square</a>
+                <a href="https://booksy.com/mybusiness">Book on Booksy</a>
+            </body>
+            </html>
+            """
+        elif self.path == '/about-us':
+            html = """
+            <html>
+            <body>
+                <h1>About</h1>
+                <p>We are a team.</p>
+                <a href="/team">Meet the Team</a>
+            </body>
+            </html>
+            """
+        elif self.path == '/team':
+             html = """
+            <html>
+            <body>
+                <h1>Team</h1>
+                <p>team@localtest.com</p>
+            </body>
+            </html>
+            """
+        else:
+            html = "<html><body>404 Not Found</body></html>"
+
         self.wfile.write(html.encode('utf-8'))
 
 def start_server():

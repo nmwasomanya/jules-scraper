@@ -37,7 +37,6 @@ class AsyncScraper:
 
         # Regex Patterns
         self.email_pattern = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
-        self.fb_pattern = re.compile(r'(?:https?://)?(?:www\.|m\.)?(?:facebook\.com|fb\.com|fb\.me)/(?:(?:\w)*#!(?:/))?(?:pages/)?(?:[\w\-]*\/)*([\w\-\.]+)(?:/)?')
 
         # Timeout settings
         self.timeout_seconds = self.config.get('request_timeout', 15)
@@ -102,30 +101,28 @@ class AsyncScraper:
         for attempt in range(self.max_retries + 1):
             try:
                 # Random delay
-                min_delay = self.config.get('delay_between_requests_min', 0.5)
-                max_delay = self.config.get('delay_between_requests_max', 2.0)
+                min_delay = self.config.get('delay_between_requests_min', 0.1)
+                max_delay = self.config.get('delay_between_requests_max', 1.0)
                 await asyncio.sleep(random.uniform(min_delay, max_delay))
 
                 async with session.get(url, headers=self.get_headers(), timeout=self.timeout, ssl=self.config.get('verify_ssl', False)) as response:
                     if response.status == 200:
-                        # Limit size to prevent memory issues with massive pages
-                        # Reading strictly up to 5MB
                         content = await response.content.read(5 * 1024 * 1024)
                         try:
                             return content.decode('utf-8', errors='ignore')
                         except Exception:
                             return content.decode('latin-1', errors='ignore')
                     elif response.status in [403, 401, 429]:
-                        logging.warning(f"Access denied {response.status} for {url}. Attempt {attempt+1}/{self.max_retries+1}")
+                        logging.debug(f"Access denied {response.status} for {url}. Attempt {attempt+1}")
                     else:
-                        logging.warning(f"Status {response.status} for {url}")
+                        logging.debug(f"Status {response.status} for {url}")
 
             except asyncio.TimeoutError:
-                logging.warning(f"Timeout ({self.timeout_seconds}s) for {url}. Attempt {attempt+1}/{self.max_retries+1}")
+                logging.debug(f"Timeout ({self.timeout_seconds}s) for {url}")
             except aiohttp.ClientError as e:
-                logging.warning(f"ClientError for {url}: {str(e)}. Attempt {attempt+1}/{self.max_retries+1}")
+                logging.debug(f"ClientError for {url}: {str(e)}")
             except Exception as e:
-                logging.error(f"Unexpected error for {url}: {str(e)}")
+                logging.debug(f"Unexpected error for {url}: {str(e)}")
 
             # Exponential backoff for retries
             if attempt < self.max_retries:
@@ -134,33 +131,27 @@ class AsyncScraper:
         return None
 
     def extract_data(self, html: str, base_url: str) -> Dict[str, Set[str]]:
-        """Extract emails and Facebook links from HTML."""
+        """Extract emails, Facebook links, and new candidate links from HTML."""
         if not html:
-            return {'emails': set(), 'facebook': set()}
+            return {'emails': set(), 'facebook': set(), 'links': set()}
 
         soup = BeautifulSoup(html, 'lxml')
         text_content = soup.get_text()
 
-        # Extract Emails
+        # 1. Extract Emails
         found_emails = set()
-
-        # 1. From text content
         text_emails = self.email_pattern.findall(text_content)
         found_emails.update(text_emails)
 
-        # 2. From mailto links
         for link in soup.select('a[href^="mailto:"]'):
             href = link.get('href', '')
             if href:
-                # Handle 'mailto:user@example.com?subject=...'
                 clean_email = href.replace('mailto:', '').split('?')[0]
                 if self.email_pattern.match(clean_email):
                     found_emails.add(clean_email)
 
-        # Validate and Filter Emails
         valid_emails = set()
         for email in found_emails:
-            # Clean trailing periods or dots that regex might have picked up at end of sentence
             email = email.rstrip('.')
             is_valid, reason = self.is_valid_email(email)
             if is_valid:
@@ -168,21 +159,111 @@ class AsyncScraper:
             else:
                 log_filtered_item("Email", email, reason)
 
-        # Extract Facebook Links
+        # 2. Extract Facebook Links & Candidate Links
         facebook_links = set()
+        candidate_links = set()
 
-        # Search all 'a' tags
+        follow_platforms = self.config.get('booking_platforms_follow', [])
+        skip_platforms = self.config.get('booking_platforms_skip', [])
+        keywords = self.config.get('link_keywords', [])
+
+        base_domain = urlparse(base_url).netloc
+
         for link in soup.find_all('a', href=True):
             href = link['href']
-            # Resolve relative URLs
             absolute_url = urljoin(base_url, href)
+            parsed_url = urlparse(absolute_url)
 
+            # Facebook
             if 'facebook.com' in absolute_url or 'fb.com' in absolute_url:
-                 # Basic filter to avoid share links if possible, though regex helps
                  if 'share' not in absolute_url and 'sharer' not in absolute_url:
                      facebook_links.add(absolute_url)
 
+            # Booking Platforms
+            if any(p in absolute_url for p in follow_platforms):
+                candidate_links.add(absolute_url)
+            elif any(p in absolute_url for p in skip_platforms):
+                # Just log, don't follow
+                logging.info(f"Booking platform detected but skipped: {absolute_url}")
+
+            # Internal Links with Keywords
+            # Must be same domain (ignoring www)
+            # Simple check: if netloc ends with base_domain (approximate)
+            if parsed_url.netloc == base_domain or parsed_url.netloc == "":
+                 lower_href = href.lower()
+                 if any(kw in lower_href for kw in keywords):
+                     candidate_links.add(absolute_url)
+
         return {
             'emails': valid_emails,
-            'facebook': facebook_links
+            'facebook': facebook_links,
+            'links': candidate_links
+        }
+
+    async def crawl_website(self, session: aiohttp.ClientSession, start_url: str) -> Dict[str, Set[str]]:
+        """Crawl the website starting from start_url."""
+        if not start_url.startswith(('http://', 'https://')):
+            start_url = 'http://' + start_url
+
+        base_domain = urlparse(start_url).netloc
+        domain_timeout = self.config.get('domain_timeout', 45)
+        max_pages = self.config.get('max_pages_per_domain', 15)
+
+        visited = set()
+        queue = [start_url]
+
+        # Add priority paths
+        priority_paths = self.config.get('priority_paths', [])
+        # Ensure start_url doesn't have trailing slash for path appending
+        clean_start = start_url.rstrip('/')
+        for path in priority_paths:
+            if not path.startswith('/'): path = '/' + path
+            queue.append(clean_start + path)
+
+        all_emails = set()
+        all_facebook = set()
+        pages_crawled = 0
+
+        start_time = time.time()
+
+        while queue and pages_crawled < max_pages:
+            if time.time() - start_time > domain_timeout:
+                logging.info(f"Domain timeout for {base_domain}")
+                break
+
+            current_url = queue.pop(0)
+
+            # Normalize for visited check (strip trailing slash, etc if needed)
+            if current_url in visited:
+                continue
+            visited.add(current_url)
+
+            logging.debug(f"Crawling {current_url} ({pages_crawled+1}/{max_pages})")
+
+            html = await self.fetch_html(session, current_url)
+            pages_crawled += 1
+
+            if html:
+                data = self.extract_data(html, current_url)
+                all_emails.update(data['emails'])
+                all_facebook.update(data['facebook'])
+
+                # Add new discovered links to queue
+                for link in data['links']:
+                    if link not in visited and link not in queue:
+                        # Safety check: ensure we don't crawl infinite external sites
+                        # Allow booking platforms, or same domain
+                        parsed_link = urlparse(link)
+                        is_same_domain = parsed_link.netloc == base_domain
+                        is_booking = any(p in link for p in self.config.get('booking_platforms_follow', []))
+
+                        if is_booking:
+                             # Prioritize booking platforms
+                             queue.insert(0, link)
+                        elif is_same_domain:
+                            queue.append(link)
+
+        return {
+            'emails': all_emails,
+            'facebook': all_facebook
         }

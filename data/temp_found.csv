@@ -1,3 +1,2 @@
 Website,Company,Industry,Extracted Emails,Facebook Links
-http://localhost:8000,Local Test,Testing,sales@localtest.com,https://facebook.com/localtestpage
 http://localhost:8000,Local Test,Testing,contact@localtest.com,https://facebook.com/localtestpage

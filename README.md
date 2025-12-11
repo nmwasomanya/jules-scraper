@@ -5,11 +5,13 @@ This is a production-ready, asynchronous web scraper designed to process thousan
 ## Features
 
 - **High Performance**: Uses `aiohttp` and `asyncio` for non-blocking I/O. Capable of handling 150+ concurrent requests.
+- **Deep Crawling**: Automatically crawls priority pages (`/contact`, `/about`, `/book`, etc.) to find hidden contact info.
+- **Smart Detection**: Detects and follows booking platforms (Square, Calendly, etc.) to extract emails from them.
 - **Resilient**: Includes retries, exponential backoff, and strict timeouts to prevent hanging.
 - **Row Explosion**: Automatically creates separate rows for each extracted email while preserving original data.
 - **Filtering**: Robust filtering system to exclude domains (.edu, .gov) and ignore placeholder emails.
 - **Checkpointing**: Saves progress automatically and resumes from where it left off.
-- **Memory Efficient**: Streams results to disk in batches to keep RAM usage low.
+- **Multi-Sheet Output**: Generates an Excel file with "Emails Found" and "No Emails" sheets.
 
 ## Installation
 
@@ -39,8 +41,11 @@ Edit `config.yaml` to adjust settings:
 ```yaml
 max_concurrent_requests: 20   # Increase to 100-200 on a good server
 request_timeout: 15           # Strict timeout per request
+domain_timeout: 45            # Max time to spend on one website
+max_pages_per_domain: 15      # Max pages to crawl per website
 input_file: "data/input.csv"
-output_file: "data/output.csv"
+output_file: "data/output.xlsx"
+priority_paths: ["/contact", "/about", ...]
 ```
 
 Edit `filters.json` to manage exclusion rules:
@@ -73,7 +78,7 @@ Edit `filters.json` to manage exclusion rules:
     -   Filtered items: `logs/filtered_items.log`
 
 4.  **Results**:
-    Output is saved to `data/output.csv`.
+    Output is saved to `data/output.xlsx`.
 
 ## Troubleshooting
 

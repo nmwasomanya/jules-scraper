@@ -2,14 +2,19 @@
 
 # Network Settings
 max_concurrent_requests: 5
-request_timeout: 5  # Short timeout for testing
+request_timeout: 5  # Per request timeout
+domain_timeout: 45      # Per domain total timeout
 delay_between_requests_min: 0.1
 delay_between_requests_max: 0.5
 max_retries_per_url: 1
 
+# Crawling Settings
+max_pages_per_domain: 15
+smart_stopping_enabled: false
+
 # Input/Output
 input_file: "data/test_data.csv"
-output_file: "data/output.xlsx"  # Changed to .xlsx
+output_file: "data/output.xlsx"
 error_log: "logs/error.log"
 filtered_items_log: "logs/filtered_items.log"
 checkpoint_file: "data/checkpoint.json"
@@ -21,3 +26,48 @@ save_frequency: 2
 
 # Facebook specific
 facebook_explode_rows: false
+
+# Priority Paths to Check
+priority_paths:
+  - "/contact"
+  - "/contact-us"
+  - "/contactus"
+  - "/contact.html"
+  - "/about/contact"
+  - "/about-us"
+  - "/about"
+  - "/aboutus"
+  - "/book"
+  - "/booking"
+  - "/book-now"
+  - "/appointments"
+  - "/schedule"
+  - "/reservation"
+  - "/reservations"
+  - "/team"
+  - "/our-team"
+  - "/people"
+  - "/staff"
+  - "/get-in-touch"
+  - "/reach-us"
+
+# Link Discovery Keywords
+link_keywords:
+  - "contact"
+  - "about"
+  - "team"
+  - "reach"
+  - "book"
+  - "appointment"
+  - "schedule"
+
+# Booking Platforms
+booking_platforms_follow:
+  - "square.site"
+  - "calendly.com"
+  - "acuityscheduling.com"
+  - "setmore.com"
+
+booking_platforms_skip:
+  - "booksy.com"
+  - "vagaro.com"

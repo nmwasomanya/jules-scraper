@@ -111,16 +111,20 @@ class ScraperManager:
                 return
 
             try:
-                html = await self.scraper.fetch_html(session, url)
-                if html:
-                    data = self.scraper.extract_data(html, url)
+                # Use deep crawling
+                data = await self.scraper.crawl_website(session, url)
+
+                if data['emails'] or data['facebook']:
                     self.stats['success'] += 1
                     self.stats['emails_found'] += len(data['emails'])
-
-                    self.process_results(row, data)
+                elif data:
+                    # Consider it a success if we crawled successfully even without finding data
+                    self.stats['success'] += 1
                 else:
                     self.stats['failed'] += 1
-                    # Still mark as processed to avoid retry loops on dead sites
+
+                self.process_results(row, data)
+
             except Exception as e:
                 logging.error(f"Error processing {url}: {e}")
                 self.stats['failed'] += 1
