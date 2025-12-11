@@ -9,7 +9,7 @@ max_retries_per_url: 1
 
 # Input/Output
 input_file: "data/test_data.csv"
-output_file: "data/output.csv"
+output_file: "data/output.xlsx"  # Changed to .xlsx
 error_log: "logs/error.log"
 filtered_items_log: "logs/filtered_items.log"
 checkpoint_file: "data/checkpoint.json"

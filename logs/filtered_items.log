@@ -5,3 +5,8 @@
 2025-12-11 10:32:45,935 - [Email] privacy@localtest.com - Reason: Excluded prefix: privacy@
 2025-12-11 10:32:45,935 - [Email] admin@test.edu - Reason: Excluded prefix: admin@
 2025-12-11 10:32:45,935 - [Email] support@localtest.com - Reason: Excluded prefix: support@
+2025-12-11 12:22:15,444 - [Domain] test.edu - Reason: Excluded extension: .edu
+2025-12-11 12:22:15,445 - [Domain] gov-site.gov - Reason: Excluded extension: .gov
+2025-12-11 12:22:16,316 - [Email] support@localtest.com - Reason: Excluded prefix: support@
+2025-12-11 12:22:16,317 - [Email] privacy@localtest.com - Reason: Excluded prefix: privacy@
+2025-12-11 12:22:16,318 - [Email] admin@test.edu - Reason: Excluded prefix: admin@

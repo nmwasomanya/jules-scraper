@@ -30,8 +30,14 @@ class ScraperManager:
 
         self.checkpoint_file = self.config.get('checkpoint_file', 'data/checkpoint.json')
         self.processed_urls = self.load_checkpoint()
-        self.output_file = self.config.get('output_file', 'data/output.csv')
-        self.temp_results = []
+        self.output_file = self.config.get('output_file', 'data/output.xlsx')
+
+        # Temporary files for buffering
+        self.temp_found_file = 'data/temp_found.csv'
+        self.temp_not_found_file = 'data/temp_not_found.csv'
+
+        self.temp_found = []
+        self.temp_not_found = []
 
         # Performance stats
         self.stats = {
@@ -130,41 +136,78 @@ class ScraperManager:
 
         # Row Explosion Logic
         if not emails:
-            # No emails found: 1 row
+            # No emails found
             new_row = original_row.to_dict()
             new_row['Extracted Emails'] = ''
             new_row['Facebook Links'] = fb_str
-            self.temp_results.append(new_row)
+            self.temp_not_found.append(new_row)
         else:
             # Multiple emails: multiple rows
             for email in emails:
                 new_row = original_row.to_dict()
                 new_row['Extracted Emails'] = email
                 new_row['Facebook Links'] = fb_str
-                self.temp_results.append(new_row)
+                self.temp_found.append(new_row)
 
     def flush_results(self):
-        if not self.temp_results:
+        # Flush Found
+        if self.temp_found:
+            df_found = pd.DataFrame(self.temp_found)
+            header = not os.path.exists(self.temp_found_file)
+            df_found.to_csv(self.temp_found_file, mode='a', header=header, index=False)
+            logging.debug(f"Flushed {len(self.temp_found)} found rows.")
+            self.temp_found = []
+
+        # Flush Not Found
+        if self.temp_not_found:
+            df_not_found = pd.DataFrame(self.temp_not_found)
+            header = not os.path.exists(self.temp_not_found_file)
+            df_not_found.to_csv(self.temp_not_found_file, mode='a', header=header, index=False)
+            logging.debug(f"Flushed {len(self.temp_not_found)} not found rows.")
+            self.temp_not_found = []
+
+        self.save_checkpoint()
+
+    def finalize_output(self):
+        """Combine temp CSVs into final Excel file."""
+        logging.info("Finalizing output...")
+
+        # Check if we need to do anything
+        if not os.path.exists(self.temp_found_file) and not os.path.exists(self.temp_not_found_file):
+            logging.warning("No data found to finalize.")
             return
 
-        df = pd.DataFrame(self.temp_results)
+        try:
+            with pd.ExcelWriter(self.output_file, engine='openpyxl') as writer:
+                # Write "Emails Found" Sheet
+                if os.path.exists(self.temp_found_file):
+                    df_found = pd.read_csv(self.temp_found_file)
+                    df_found.to_excel(writer, sheet_name='Emails Found', index=False)
+                    logging.info(f"Wrote {len(df_found)} rows to 'Emails Found'")
+                else:
+                    # Create empty sheet
+                    pd.DataFrame(columns=['Website']).to_excel(writer, sheet_name='Emails Found', index=False)
 
-        # Append to CSV
-        header = not os.path.exists(self.output_file)
-        df.to_csv(self.output_file, mode='a', header=header, index=False)
+                # Write "No Emails" Sheet
+                if os.path.exists(self.temp_not_found_file):
+                    df_nf = pd.read_csv(self.temp_not_found_file)
+                    df_nf.to_excel(writer, sheet_name='No Emails', index=False)
+                    logging.info(f"Wrote {len(df_nf)} rows to 'No Emails'")
+                else:
+                     pd.DataFrame(columns=['Website']).to_excel(writer, sheet_name='No Emails', index=False)
 
-        logging.info(f"Flushed {len(self.temp_results)} rows to {self.output_file}")
-        self.temp_results = []
-        self.save_checkpoint()
+            logging.info(f"Output saved to {self.output_file}")
+
+        except Exception as e:
+            logging.error(f"Failed to write Excel file: {e}")
 
     async def run(self):
         df = self.load_input()
         logging.info(f"Loaded {len(df)} rows from input.")
 
         # Create TCPConnector with limits
-        # We limit the pool size but rely on Semaphore for concurrency control
         connector = aiohttp.TCPConnector(limit=0, ttl_dns_cache=300)
-        timeout = aiohttp.ClientTimeout(total=None) # We handle individual request timeouts
+        timeout = aiohttp.ClientTimeout(total=None)
 
         concurrency = self.config.get('max_concurrent_requests', 20)
         semaphore = asyncio.Semaphore(concurrency)
@@ -180,9 +223,8 @@ class ScraperManager:
                 task = asyncio.create_task(self.process_row(session, row, semaphore))
                 tasks.append(task)
 
-                # Batch processing to manage memory and saves
+                # Batch processing
                 if len(tasks) >= concurrency * 2:
-                     # Wait for some tasks to finish before adding more to avoid huge queue
                     done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                     tasks = list(pending)
 
@@ -195,6 +237,7 @@ class ScraperManager:
                 await asyncio.gather(*tasks)
 
         self.flush_results()
+        self.finalize_output()
         self.save_checkpoint()
 
         elapsed = time.time() - self.stats['start_time']
