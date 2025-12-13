@@ -68,12 +68,16 @@ class ScraperManager:
             logging.error(f"Input file not found: {input_path}")
             sys.exit(1)
 
-        if input_path.endswith('.csv'):
-            return pd.read_csv(input_path)
-        elif input_path.endswith(('.xls', '.xlsx')):
-            return pd.read_excel(input_path)
-        else:
-            logging.error("Unsupported file format. Use CSV or Excel.")
+        try:
+            if input_path.endswith('.csv'):
+                return pd.read_csv(input_path)
+            elif input_path.endswith(('.xls', '.xlsx')):
+                return pd.read_excel(input_path)
+            else:
+                logging.error("Unsupported file format. Use CSV or Excel.")
+                sys.exit(1)
+        except Exception as e:
+            logging.error(f"Failed to load input file: {e}")
             sys.exit(1)
 
     async def process_row(self, session: aiohttp.ClientSession, row: pd.Series, semaphore: asyncio.Semaphore):
@@ -202,6 +206,12 @@ class ScraperManager:
 
             logging.info(f"Output saved to {self.output_file}")
 
+            # Clean up temp files
+            if os.path.exists(self.temp_found_file):
+                os.remove(self.temp_found_file)
+            if os.path.exists(self.temp_not_found_file):
+                os.remove(self.temp_not_found_file)
+
         except Exception as e:
             logging.error(f"Failed to write Excel file: {e}")
 
@@ -210,6 +220,9 @@ class ScraperManager:
         logging.info(f"Loaded {len(df)} rows from input.")
 
         # Create TCPConnector with limits
+        # Using 0 for limit means no limit on total connections,
+        # but we limit concurrency via semaphore.
+        # ttl_dns_cache helps with DNS resolution performance.
         connector = aiohttp.TCPConnector(limit=0, ttl_dns_cache=300)
         timeout = aiohttp.ClientTimeout(total=None)
 
@@ -227,10 +240,13 @@ class ScraperManager:
                 task = asyncio.create_task(self.process_row(session, row, semaphore))
                 tasks.append(task)
 
-                # Batch processing
-                if len(tasks) >= concurrency * 2:
+                # Batch processing cleanup
+                # Periodically remove done tasks to free memory
+                if len(tasks) >= concurrency * 3:
                     done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                     tasks = list(pending)
+
+                    # Also force garbage collection if needed, but python handles this usually.
 
                 # Periodic Save
                 if self.stats['total'] > 0 and self.stats['total'] % save_freq == 0:
@@ -238,7 +254,7 @@ class ScraperManager:
 
             # Wait for remaining tasks
             if tasks:
-                await asyncio.gather(*tasks)
+                await asyncio.gather(*tasks, return_exceptions=True)
 
         self.flush_results()
         self.finalize_output()

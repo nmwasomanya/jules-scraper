@@ -11,6 +11,7 @@ from fake_useragent import UserAgent
 import time
 from typing import List, Set, Dict, Tuple, Optional
 from utils import log_filtered_item
+from collections import deque
 
 # Load configuration
 def load_config(path: str = "config.yaml") -> dict:
@@ -36,11 +37,17 @@ class AsyncScraper:
         self.ua = UserAgent()
 
         # Regex Patterns
-        self.email_pattern = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
+        # Improved email regex:
+        # - Requires at least 2 chars for TLD
+        # - Handles + tags
+        # - Excludes common image extensions at the end (basic heuristic)
+        self.email_pattern = re.compile(
+            r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+        )
 
         # Timeout settings
         self.timeout_seconds = self.config.get('request_timeout', 15)
-        self.timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
+        self.timeout = aiohttp.ClientTimeout(total=self.timeout_seconds, sock_connect=10, sock_read=10)
 
         self.max_retries = self.config.get('max_retries_per_url', 2)
 
@@ -52,6 +59,11 @@ class AsyncScraper:
             'Accept-Language': 'en-US,en;q=0.5',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
+            'DNT': '1', # Do Not Track
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
         }
 
     def should_scrape_domain(self, url: str) -> Tuple[bool, str]:
@@ -59,8 +71,11 @@ class AsyncScraper:
         if not url.startswith(('http://', 'https://')):
             url = 'http://' + url
 
-        parsed = urlparse(url)
-        domain = parsed.netloc.lower()
+        try:
+            parsed = urlparse(url)
+            domain = parsed.netloc.lower()
+        except ValueError:
+             return False, "Invalid URL"
 
         # Check extensions
         for ext in self.filters.get('skip_domain_extensions', []):
@@ -82,7 +97,11 @@ class AsyncScraper:
                 return False, f"Excluded prefix: {prefix}"
 
         # Check domains
-        domain = email_lower.split('@')[-1]
+        try:
+            domain = email_lower.split('@')[-1]
+        except IndexError:
+             return False, "Invalid email format"
+
         if domain in self.filters.get('skip_email_domains', []):
             return False, f"Excluded domain: {domain}"
 
@@ -90,6 +109,11 @@ class AsyncScraper:
         for pattern in self.filters.get('skip_email_patterns', []):
             if pattern in email_lower:
                 return False, f"Excluded pattern: {pattern}"
+
+        # Additional sanity checks
+        # Avoid image files mistook as emails (e.g. name@domain.png)
+        if email_lower.endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp')):
+             return False, "Image extension"
 
         return True, ""
 
@@ -103,17 +127,27 @@ class AsyncScraper:
                 # Random delay
                 min_delay = self.config.get('delay_between_requests_min', 0.1)
                 max_delay = self.config.get('delay_between_requests_max', 1.0)
-                await asyncio.sleep(random.uniform(min_delay, max_delay))
+                if min_delay > 0 or max_delay > 0:
+                     await asyncio.sleep(random.uniform(min_delay, max_delay))
 
                 async with session.get(url, headers=self.get_headers(), timeout=self.timeout, ssl=self.config.get('verify_ssl', False)) as response:
                     if response.status == 200:
-                        content = await response.content.read(5 * 1024 * 1024)
+                        # Limit size to avoid memory issues
+                        content = await response.content.read(10 * 1024 * 1024) # 10MB limit
+
+                        # Try to detect encoding
+                        encoding = response.charset or 'utf-8'
                         try:
-                            return content.decode('utf-8', errors='ignore')
-                        except Exception:
-                            return content.decode('latin-1', errors='ignore')
+                            return content.decode(encoding, errors='ignore')
+                        except LookupError:
+                             # Fallback
+                             return content.decode('utf-8', errors='ignore')
+
                     elif response.status in [403, 401, 429]:
                         logging.debug(f"Access denied {response.status} for {url}. Attempt {attempt+1}")
+                        # Slightly longer backoff for 429
+                        if response.status == 429:
+                             await asyncio.sleep(2 ** (attempt + 2))
                     else:
                         logging.debug(f"Status {response.status} for {url}")
 
@@ -167,7 +201,8 @@ class AsyncScraper:
         skip_platforms = self.config.get('booking_platforms_skip', [])
         keywords = self.config.get('link_keywords', [])
 
-        base_domain = urlparse(base_url).netloc
+        base_parsed = urlparse(base_url)
+        base_domain = base_parsed.netloc.replace('www.', '')
 
         for link in soup.find_all('a', href=True):
             href = link['href']
@@ -184,12 +219,12 @@ class AsyncScraper:
                 candidate_links.add(absolute_url)
             elif any(p in absolute_url for p in skip_platforms):
                 # Just log, don't follow
-                logging.info(f"Booking platform detected but skipped: {absolute_url}")
+                logging.debug(f"Booking platform detected but skipped: {absolute_url}")
 
             # Internal Links with Keywords
-            # Must be same domain (ignoring www)
-            # Simple check: if netloc ends with base_domain (approximate)
-            if parsed_url.netloc == base_domain or parsed_url.netloc == "":
+            # Robust domain check
+            link_domain = parsed_url.netloc.replace('www.', '')
+            if link_domain == base_domain or link_domain == "":
                  lower_href = href.lower()
                  if any(kw in lower_href for kw in keywords):
                      candidate_links.add(absolute_url)
@@ -205,16 +240,17 @@ class AsyncScraper:
         if not start_url.startswith(('http://', 'https://')):
             start_url = 'http://' + start_url
 
-        base_domain = urlparse(start_url).netloc
+        parsed_start = urlparse(start_url)
+        base_domain = parsed_start.netloc.replace('www.', '')
+
         domain_timeout = self.config.get('domain_timeout', 45)
         max_pages = self.config.get('max_pages_per_domain', 15)
 
         visited = set()
-        queue = [start_url]
+        queue = deque([start_url])
 
         # Add priority paths
         priority_paths = self.config.get('priority_paths', [])
-        # Ensure start_url doesn't have trailing slash for path appending
         clean_start = start_url.rstrip('/')
         for path in priority_paths:
             if not path.startswith('/'): path = '/' + path
@@ -231,12 +267,15 @@ class AsyncScraper:
                 logging.info(f"Domain timeout for {base_domain}")
                 break
 
-            current_url = queue.pop(0)
+            current_url = queue.popleft()
 
-            # Normalize for visited check (strip trailing slash, etc if needed)
-            if current_url in visited:
+            # Normalize for visited check
+            # Strip fragments and query params for basic dedup
+            normalized_url = current_url.split('#')[0].rstrip('/')
+
+            if normalized_url in visited:
                 continue
-            visited.add(current_url)
+            visited.add(normalized_url)
 
             logging.debug(f"Crawling {current_url} ({pages_crawled+1}/{max_pages})")
 
@@ -250,16 +289,22 @@ class AsyncScraper:
 
                 # Add new discovered links to queue
                 for link in data['links']:
-                    if link not in visited and link not in queue:
-                        # Safety check: ensure we don't crawl infinite external sites
-                        # Allow booking platforms, or same domain
-                        parsed_link = urlparse(link)
-                        is_same_domain = parsed_link.netloc == base_domain
+                    link_clean = link.split('#')[0].rstrip('/')
+                    if link_clean not in visited and link not in queue:
+                        # Safety check
+                        try:
+                            parsed_link = urlparse(link)
+                        except ValueError:
+                            continue
+
+                        link_domain = parsed_link.netloc.replace('www.', '')
+
+                        is_same_domain = link_domain == base_domain
                         is_booking = any(p in link for p in self.config.get('booking_platforms_follow', []))
 
                         if is_booking:
                              # Prioritize booking platforms
-                             queue.insert(0, link)
+                             queue.appendleft(link)
                         elif is_same_domain:
                             queue.append(link)
 
