@@ -10,6 +10,7 @@ max_retries_per_url: 1
 
 # Crawling Settings
 max_pages_per_domain: 15
+max_emails_per_domain: 10
 smart_stopping_enabled: false
 
 # Input/Output
