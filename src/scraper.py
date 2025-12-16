@@ -12,9 +12,10 @@ from typing import List, Set, Dict, Tuple, Optional
 from utils import log_filtered_item, normalize_url
 
 class AsyncScraper:
-    def __init__(self, config: dict, filters: dict):
+    def __init__(self, config: dict, filters: dict, proxies: List[str] = None):
         self.config = config
         self.filters = filters
+        self.proxies = proxies or []
         self.ua = UserAgent()
         self.tld_extractor = tldextract.TLDExtract()
 
@@ -95,7 +96,11 @@ class AsyncScraper:
                 max_delay = self.config.get('delay_between_requests_max', 1.0)
                 await asyncio.sleep(random.uniform(min_delay, max_delay))
 
-                async with session.get(url, headers=self.get_headers(), timeout=self.timeout, ssl=self.config.get('verify_ssl', False)) as response:
+                proxy = None
+                if self.config.get('use_proxies', False) and self.proxies:
+                    proxy = random.choice(self.proxies)
+
+                async with session.get(url, headers=self.get_headers(), proxy=proxy, timeout=self.timeout, ssl=self.config.get('verify_ssl', False)) as response:
                     if response.status == 200:
                         content = await response.content.read(5 * 1024 * 1024)
                         try:
