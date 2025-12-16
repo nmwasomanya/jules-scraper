@@ -33,8 +33,11 @@ class ScraperManager:
         self.output_file = self.config.get('output_file', 'data/output.xlsx')
 
         # Temporary files for buffering
-        self.temp_found_file = 'data/temp_found.csv'
-        self.temp_not_found_file = 'data/temp_not_found.csv'
+        self.temp_dir = self.config.get('temp_dir', 'data')
+        os.makedirs(self.temp_dir, exist_ok=True)
+
+        self.temp_found_file = os.path.join(self.temp_dir, 'temp_found.csv')
+        self.temp_not_found_file = os.path.join(self.temp_dir, 'temp_not_found.csv')
 
         self.temp_found = []
         self.temp_not_found = []
@@ -61,6 +64,16 @@ class ScraperManager:
     def save_checkpoint(self):
         with open(self.checkpoint_file, 'w') as f:
             json.dump(list(self.processed_urls), f)
+
+    def cleanup_temp_files(self):
+        """Removes temporary CSV files."""
+        for f in [self.temp_found_file, self.temp_not_found_file]:
+            if os.path.exists(f):
+                try:
+                    os.remove(f)
+                    logging.info(f"Removed temporary file: {f}")
+                except OSError as e:
+                    logging.warning(f"Error deleting temporary file {f}: {e}")
 
     def load_input(self) -> pd.DataFrame:
         input_path = self.config.get('input_file', 'data/input.csv')
@@ -243,6 +256,13 @@ class ScraperManager:
         self.flush_results()
         self.finalize_output()
         self.save_checkpoint()
+
+        # Cleanup if not interrupted
+        if not shutdown_event.is_set():
+            logging.info("Scraping completed successfully. Cleaning up temporary files.")
+            self.cleanup_temp_files()
+        else:
+            logging.info("Scraping interrupted. Keeping temporary files for resume.")
 
         elapsed = time.time() - self.stats['start_time']
         logging.info(f"Scraping completed in {elapsed:.2f}s.")
