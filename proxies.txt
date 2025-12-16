@@ -3,3 +3,9 @@ http://cyrus198:cyrus198@23.95.150.145:6114
 http://cyrus198:cyrus198@198.23.239.134:6540
 http://cyrus198:cyrus198@107.172.163.27:6543
 http://cyrus198:cyrus198@216.10.27.159:6837
+http://jules_LByep:b+F~6CQs_17JQkF@93.115.200.159:8001
+http://jules_LByep:b+F~6CQs_17JQkF@93.115.200.158:8002
+http://jules_LByep:b+F~6CQs_17JQkF@93.115.200.157:8003
+http://jules_LByep:b+F~6CQs_17JQkF@93.115.200.156:8004
+http://jules_LByep:b+F~6CQs_17JQkF@93.115.200.155:8005
+
