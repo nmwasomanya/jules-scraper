@@ -238,6 +238,7 @@ class AsyncScraper:
         base_domain = self.get_base_domain(start_url)
         domain_timeout = self.config.get('domain_timeout', 45)
         max_pages = self.config.get('max_pages_per_domain', 15)
+        max_emails = self.config.get('max_emails_per_domain', 10)
 
         visited = set()
         queue = [start_url]
@@ -279,6 +280,10 @@ class AsyncScraper:
                 data = self.extract_data(html, current_url)
                 all_emails.update(data['emails'])
                 all_facebook.update(data['facebook'])
+
+                if len(all_emails) >= max_emails:
+                    logging.info(f"Reached max emails ({max_emails}) for {base_domain}")
+                    break
 
                 # Add new discovered links to queue
                 for link in data['links']:
