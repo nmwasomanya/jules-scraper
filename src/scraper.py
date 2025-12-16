@@ -5,6 +5,7 @@ import re
 import json
 import yaml
 import random
+import tldextract
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urljoin
 from fake_useragent import UserAgent
@@ -34,6 +35,7 @@ class AsyncScraper:
         self.config = config
         self.filters = filters
         self.ua = UserAgent()
+        self.tld_extractor = tldextract.TLDExtract()
 
         # Regex Patterns
         self.email_pattern = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
@@ -43,6 +45,13 @@ class AsyncScraper:
         self.timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
 
         self.max_retries = self.config.get('max_retries_per_url', 2)
+
+    def get_base_domain(self, url: str) -> str:
+        """Extract the base domain (SLD + TLD) from a URL."""
+        ext = self.tld_extractor(url)
+        if ext.suffix:
+            return f"{ext.domain}.{ext.suffix}"
+        return ext.domain
 
     def get_headers(self) -> dict:
         """Generate random headers to mimic a browser."""
@@ -167,12 +176,12 @@ class AsyncScraper:
         skip_platforms = self.config.get('booking_platforms_skip', [])
         keywords = self.config.get('link_keywords', [])
 
-        base_domain = urlparse(base_url).netloc
+        base_domain = self.get_base_domain(base_url)
 
         for link in soup.find_all('a', href=True):
             href = link['href']
             absolute_url = urljoin(base_url, href)
-            parsed_url = urlparse(absolute_url)
+            link_base_domain = self.get_base_domain(absolute_url)
 
             # Facebook
             if 'facebook.com' in absolute_url or 'fb.com' in absolute_url:
@@ -188,8 +197,7 @@ class AsyncScraper:
 
             # Internal Links with Keywords
             # Must be same domain (ignoring www)
-            # Simple check: if netloc ends with base_domain (approximate)
-            if parsed_url.netloc == base_domain or parsed_url.netloc == "":
+            if link_base_domain == base_domain:
                  lower_href = href.lower()
                  if any(kw in lower_href for kw in keywords):
                      candidate_links.add(absolute_url)
@@ -205,7 +213,7 @@ class AsyncScraper:
         if not start_url.startswith(('http://', 'https://')):
             start_url = 'http://' + start_url
 
-        base_domain = urlparse(start_url).netloc
+        base_domain = self.get_base_domain(start_url)
         domain_timeout = self.config.get('domain_timeout', 45)
         max_pages = self.config.get('max_pages_per_domain', 15)
 
@@ -253,8 +261,8 @@ class AsyncScraper:
                     if link not in visited and link not in queue:
                         # Safety check: ensure we don't crawl infinite external sites
                         # Allow booking platforms, or same domain
-                        parsed_link = urlparse(link)
-                        is_same_domain = parsed_link.netloc == base_domain
+                        link_base_domain = self.get_base_domain(link)
+                        is_same_domain = link_base_domain == base_domain
                         is_booking = any(p in link for p in self.config.get('booking_platforms_follow', []))
 
                         if is_booking:
