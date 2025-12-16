@@ -18,7 +18,7 @@ max_emails_per_domain: 1
 smart_stopping_enabled: false
 
 # Input/Output
-input_file: "data/test_data.csv"
+input_file: "data/san_jose.csv"
 output_file: "data/output.xlsx"
 error_log: "logs/error.log"
 filtered_items_log: "logs/filtered_items.log"
