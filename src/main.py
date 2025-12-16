@@ -7,9 +7,10 @@ import os
 import signal
 import sys
 import time
+import traceback
 from typing import List, Dict, Any
-from scraper import AsyncScraper, load_config, load_filters
-from utils import setup_logging, log_filtered_item
+from scraper import AsyncScraper
+from utils import setup_logging, log_filtered_item, load_config, load_filters
 
 # Global flag for graceful shutdown
 shutdown_event = asyncio.Event()
@@ -33,6 +34,10 @@ class ScraperManager:
         self.output_file = self.config.get('output_file', 'data/output.xlsx')
 
         # Temporary files for buffering
+        # Ensure data directory exists
+        if os.path.dirname(self.output_file):
+            os.makedirs(os.path.dirname(self.output_file), exist_ok=True)
+
         self.temp_found_file = 'data/temp_found.csv'
         self.temp_not_found_file = 'data/temp_not_found.csv'
 
@@ -59,8 +64,11 @@ class ScraperManager:
         return set()
 
     def save_checkpoint(self):
-        with open(self.checkpoint_file, 'w') as f:
-            json.dump(list(self.processed_urls), f)
+        try:
+            with open(self.checkpoint_file, 'w') as f:
+                json.dump(list(self.processed_urls), f)
+        except Exception as e:
+            logging.error(f"Failed to save checkpoint: {e}")
 
     def load_input(self) -> pd.DataFrame:
         input_path = self.config.get('input_file', 'data/input.csv')
@@ -68,13 +76,17 @@ class ScraperManager:
             logging.error(f"Input file not found: {input_path}")
             sys.exit(1)
 
-        if input_path.endswith('.csv'):
-            return pd.read_csv(input_path)
-        elif input_path.endswith(('.xls', '.xlsx')):
-            return pd.read_excel(input_path)
-        else:
-            logging.error("Unsupported file format. Use CSV or Excel.")
-            sys.exit(1)
+        try:
+            if input_path.endswith('.csv'):
+                return pd.read_csv(input_path)
+            elif input_path.endswith(('.xls', '.xlsx')):
+                return pd.read_excel(input_path)
+            else:
+                logging.error("Unsupported file format. Use CSV or Excel.")
+                sys.exit(1)
+        except Exception as e:
+             logging.error(f"Error reading input file: {e}")
+             sys.exit(1)
 
     async def process_row(self, session: aiohttp.ClientSession, row: pd.Series, semaphore: asyncio.Semaphore):
         if shutdown_event.is_set():
@@ -95,7 +107,7 @@ class ScraperManager:
 
             url = str(row[url_col]).strip()
 
-            if not url or pd.isna(url):
+            if not url or pd.isna(url) or url.lower() == 'nan':
                 return
 
             # Check checkpoint
@@ -127,6 +139,7 @@ class ScraperManager:
 
             except Exception as e:
                 logging.error(f"Error processing {url}: {e}")
+                logging.debug(traceback.format_exc())
                 self.stats['failed'] += 1
             finally:
                 self.processed_urls.add(url)
@@ -158,17 +171,23 @@ class ScraperManager:
         if self.temp_found:
             df_found = pd.DataFrame(self.temp_found)
             header = not os.path.exists(self.temp_found_file)
-            df_found.to_csv(self.temp_found_file, mode='a', header=header, index=False)
-            logging.debug(f"Flushed {len(self.temp_found)} found rows.")
-            self.temp_found = []
+            try:
+                df_found.to_csv(self.temp_found_file, mode='a', header=header, index=False)
+                logging.debug(f"Flushed {len(self.temp_found)} found rows.")
+                self.temp_found = []
+            except Exception as e:
+                logging.error(f"Failed to flush found results: {e}")
 
         # Flush Not Found
         if self.temp_not_found:
             df_not_found = pd.DataFrame(self.temp_not_found)
             header = not os.path.exists(self.temp_not_found_file)
-            df_not_found.to_csv(self.temp_not_found_file, mode='a', header=header, index=False)
-            logging.debug(f"Flushed {len(self.temp_not_found)} not found rows.")
-            self.temp_not_found = []
+            try:
+                df_not_found.to_csv(self.temp_not_found_file, mode='a', header=header, index=False)
+                logging.debug(f"Flushed {len(self.temp_not_found)} not found rows.")
+                self.temp_not_found = []
+            except Exception as e:
+                logging.error(f"Failed to flush not found results: {e}")
 
         self.save_checkpoint()
 
@@ -201,6 +220,14 @@ class ScraperManager:
                      pd.DataFrame(columns=['Website']).to_excel(writer, sheet_name='No Emails', index=False)
 
             logging.info(f"Output saved to {self.output_file}")
+
+            # Cleanup temp files
+            if os.path.exists(self.temp_found_file):
+                os.remove(self.temp_found_file)
+            if os.path.exists(self.temp_not_found_file):
+                os.remove(self.temp_not_found_file)
+            if os.path.exists(self.checkpoint_file):
+                os.remove(self.checkpoint_file)
 
         except Exception as e:
             logging.error(f"Failed to write Excel file: {e}")
@@ -242,7 +269,8 @@ class ScraperManager:
 
         self.flush_results()
         self.finalize_output()
-        self.save_checkpoint()
+        # Note: finalize_output deletes the checkpoint if successful.
+        # If we failed or were interrupted, checkpoint remains for resume.
 
         elapsed = time.time() - self.stats['start_time']
         logging.info(f"Scraping completed in {elapsed:.2f}s.")

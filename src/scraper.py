@@ -2,8 +2,6 @@ import asyncio
 import aiohttp
 import logging
 import re
-import json
-import yaml
 import random
 import tldextract
 from bs4 import BeautifulSoup
@@ -11,24 +9,7 @@ from urllib.parse import urlparse, urljoin
 from fake_useragent import UserAgent
 import time
 from typing import List, Set, Dict, Tuple, Optional
-from utils import log_filtered_item
-
-# Load configuration
-def load_config(path: str = "config.yaml") -> dict:
-    try:
-        with open(path, 'r') as f:
-            return yaml.safe_load(f)
-    except FileNotFoundError:
-        logging.error("config.yaml not found, using defaults")
-        return {}
-
-def load_filters(path: str = "filters.json") -> dict:
-    try:
-        with open(path, 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        logging.error("filters.json not found, using defaults")
-        return {}
+from utils import log_filtered_item, normalize_url
 
 class AsyncScraper:
     def __init__(self, config: dict, filters: dict):
@@ -179,8 +160,13 @@ class AsyncScraper:
         base_domain = self.get_base_domain(base_url)
 
         for link in soup.find_all('a', href=True):
-            href = link['href']
+            href = link.get('href', '')
+            if not href:
+                continue
+
             absolute_url = urljoin(base_url, href)
+            # Use normalized URL for candidate links to ensure consistency
+            absolute_url = normalize_url(absolute_url)
             link_base_domain = self.get_base_domain(absolute_url)
 
             # Facebook
@@ -213,6 +199,8 @@ class AsyncScraper:
         if not start_url.startswith(('http://', 'https://')):
             start_url = 'http://' + start_url
 
+        start_url = normalize_url(start_url)
+
         base_domain = self.get_base_domain(start_url)
         domain_timeout = self.config.get('domain_timeout', 45)
         max_pages = self.config.get('max_pages_per_domain', 15)
@@ -226,7 +214,7 @@ class AsyncScraper:
         clean_start = start_url.rstrip('/')
         for path in priority_paths:
             if not path.startswith('/'): path = '/' + path
-            queue.append(clean_start + path)
+            queue.append(normalize_url(clean_start + path))
 
         all_emails = set()
         all_facebook = set()
@@ -241,7 +229,9 @@ class AsyncScraper:
 
             current_url = queue.pop(0)
 
-            # Normalize for visited check (strip trailing slash, etc if needed)
+            # Normalize again just in case, though they should be normalized when added
+            current_url = normalize_url(current_url)
+
             if current_url in visited:
                 continue
             visited.add(current_url)
@@ -258,9 +248,10 @@ class AsyncScraper:
 
                 # Add new discovered links to queue
                 for link in data['links']:
+                    # link is already normalized in extract_data
+
                     if link not in visited and link not in queue:
                         # Safety check: ensure we don't crawl infinite external sites
-                        # Allow booking platforms, or same domain
                         link_base_domain = self.get_base_domain(link)
                         is_same_domain = link_base_domain == base_domain
                         is_booking = any(p in link for p in self.config.get('booking_platforms_follow', []))
@@ -270,6 +261,7 @@ class AsyncScraper:
                              queue.insert(0, link)
                         elif is_same_domain:
                             queue.append(link)
+                        # Else: external link that is not a booking platform -> ignore
 
         return {
             'emails': all_emails,
