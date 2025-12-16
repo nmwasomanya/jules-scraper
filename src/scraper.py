@@ -5,7 +5,7 @@ import re
 import random
 import tldextract
 from bs4 import BeautifulSoup
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse, urljoin, unquote
 from fake_useragent import UserAgent
 import time
 from typing import List, Set, Dict, Tuple, Optional
@@ -120,22 +120,56 @@ class AsyncScraper:
 
         return None
 
+    def decode_cloudflare_email(self, encoded_string: str) -> Optional[str]:
+        """Decode Cloudflare email protection string."""
+        try:
+            r = int(encoded_string[:2], 16)
+            email = ''.join([chr(int(encoded_string[i:i+2], 16) ^ r) for i in range(2, len(encoded_string), 2)])
+            return email
+        except Exception:
+            return None
+
+    def deobfuscate_text(self, text: str) -> str:
+        """Replace common obfuscation patterns with standard characters."""
+        # Replace markers
+        text = text.replace('[at]', '@').replace('(at)', '@').replace(' at ', '@')
+        text = text.replace('[dot]', '.').replace('(dot)', '.').replace(' dot ', '.')
+
+        # Remove spaces around @ and . to fix "user @ domain . com"
+        text = re.sub(r'\s*@\s*', '@', text)
+        text = re.sub(r'\s*\.\s*', '.', text)
+
+        return text
+
     def extract_data(self, html: str, base_url: str) -> Dict[str, Set[str]]:
         """Extract emails, Facebook links, and new candidate links from HTML."""
         if not html:
             return {'emails': set(), 'facebook': set(), 'links': set()}
 
         soup = BeautifulSoup(html, 'lxml')
+
+        # Pre-process for Cloudflare emails
+        for cf_email in soup.select('.__cf_email__'):
+            if cf_email.get('data-cfemail'):
+                decoded = self.decode_cloudflare_email(cf_email.get('data-cfemail'))
+                if decoded:
+                    cf_email.string = decoded
+
         text_content = soup.get_text()
+
+        # De-obfuscate text content
+        clean_text = self.deobfuscate_text(text_content)
 
         # 1. Extract Emails
         found_emails = set()
-        text_emails = self.email_pattern.findall(text_content)
+        text_emails = self.email_pattern.findall(clean_text)
         found_emails.update(text_emails)
 
         for link in soup.select('a[href^="mailto:"]'):
             href = link.get('href', '')
             if href:
+                # URL Decode
+                href = unquote(href)
                 clean_email = href.replace('mailto:', '').split('?')[0]
                 if self.email_pattern.match(clean_email):
                     found_emails.add(clean_email)
