@@ -97,3 +97,22 @@ def log_filtered_item(item_type: str, value: str, reason: str):
     """Log a filtered item to the specific log file."""
     logger = logging.getLogger('filtered_items')
     logger.info(f"[{item_type}] {value} - Reason: {reason}")
+
+def load_proxies(path: str) -> list:
+    """Load proxies from file."""
+    if not os.path.exists(path):
+        logging.warning(f"Proxy file {path} not found. Proxies will not be used.")
+        return []
+
+    proxies = []
+    try:
+        with open(path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    proxies.append(line)
+        logging.info(f"Loaded {len(proxies)} proxies from {path}")
+        return proxies
+    except Exception as e:
+        logging.error(f"Error loading proxies: {e}")
+        return []

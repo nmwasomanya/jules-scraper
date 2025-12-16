@@ -10,7 +10,7 @@ import time
 import traceback
 from typing import List, Dict, Any
 from scraper import AsyncScraper
-from utils import setup_logging, log_filtered_item, load_config, load_filters
+from utils import setup_logging, log_filtered_item, load_config, load_filters, load_proxies
 
 # Global flag for graceful shutdown
 shutdown_event = asyncio.Event()
@@ -27,7 +27,13 @@ class ScraperManager:
         self.config = load_config()
         self.filters = load_filters()
         self.logger, self.filtered_logger = setup_logging(self.config)
-        self.scraper = AsyncScraper(self.config, self.filters)
+
+        proxies = []
+        if self.config.get('use_proxies', False):
+            proxy_file = self.config.get('proxy_file', 'proxies.txt')
+            proxies = load_proxies(proxy_file)
+
+        self.scraper = AsyncScraper(self.config, self.filters, proxies)
 
         self.checkpoint_file = self.config.get('checkpoint_file', 'data/checkpoint.json')
         self.processed_urls = self.load_checkpoint()
