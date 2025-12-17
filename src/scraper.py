@@ -10,7 +10,6 @@ from fake_useragent import UserAgent
 import time
 from typing import List, Set, Dict, Tuple, Optional
 from utils import log_filtered_item, normalize_url
-from email_validator import validate_email, EmailNotValidError
 
 class AsyncScraper:
     def __init__(self, config: dict, filters: dict, proxies: List[str] = None):
@@ -21,6 +20,8 @@ class AsyncScraper:
         self.tld_extractor = tldextract.TLDExtract()
 
         # Regex Patterns
+        # Improved regex to avoid matching things like "user@domain.png" if not desired,
+        # but for now we keep it standard and broad to catch everything, then filter.
         self.email_pattern = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
 
         # Timeout settings
@@ -67,31 +68,33 @@ class AsyncScraper:
         # 1. Basic length check
         if len(email) > 100: return False, "Too long"
 
-        # 2. Syntax and Deliverability check using email-validator
-        try:
-            # check_deliverability=True performs DNS checks (as requested by user)
-            v = validate_email(email, check_deliverability=True)
-            email = v.normalized
-        except EmailNotValidError as e:
-            # Optionally log the reason
-            return False, str(e)
-        except Exception as e:
-            # Handle other potential errors (like DNS timeout if not handled by library)
-            return False, f"Validation error: {str(e)}"
+        # 2. Basic Syntax Check (Regex)
+        # We rely on the regex used during extraction, but double check here.
+        if not self.email_pattern.match(email):
+            return False, "Invalid syntax"
 
         email_lower = email.lower()
 
-        # 3. Check prefixes
+        # 3. Check for common binary/image extensions that might be mistaken for emails
+        # e.g. user@image.png (less common in email regex but possible)
+        bad_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.css', '.js', '.svg', '.woff', '.ttf']
+        if any(email_lower.endswith(ext) for ext in bad_extensions):
+            return False, "Invalid extension"
+
+        # 4. Check prefixes
         for prefix in self.filters.get('skip_email_prefixes', []):
             if email_lower.startswith(prefix):
                 return False, f"Excluded prefix: {prefix}"
 
-        # 4. Check domains (Junk Domains)
-        domain = email_lower.split('@')[-1]
-        if domain in self.filters.get('skip_email_domains', []):
-            return False, f"Excluded domain: {domain}"
+        # 5. Check domains (Junk Domains)
+        try:
+            domain = email_lower.split('@')[-1]
+            if domain in self.filters.get('skip_email_domains', []):
+                return False, f"Excluded domain: {domain}"
+        except IndexError:
+             return False, "Invalid format"
 
-        # 5. Check patterns
+        # 6. Check patterns
         for pattern in self.filters.get('skip_email_patterns', []):
             if pattern in email_lower:
                 return False, f"Excluded pattern: {pattern}"
