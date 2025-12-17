@@ -32,6 +32,15 @@ save_frequency: 2
 # Facebook specific
 facebook_explode_rows: false
 
+# Blacklisted Domains (Extract link but do not crawl)
+blacklisted_domains:
+  - "facebook.com"
+  - "instagram.com"
+  - "twitter.com"
+  - "linkedin.com"
+  - "yelp.com"
+  - "booksy.com"
+
 # Priority Paths to Check
 priority_paths:
   - "/contact"

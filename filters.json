@@ -9,7 +9,7 @@
     "email.com", "company.com", "mysite.info", "example.com",
     "example.org", "test.com", "domain.com", "yourcompany.com",
     "yourdomain.com", "website.com", "site.com", "business.com",
-    "godaddy.com", "wix.com", "wordpress.com"
+    "godaddy.com", "wix.com", "wordpress.com", "sentry.io"
   ],
   "skip_email_patterns": [
     "yourname@", "username@", "name@", "user@", "firstname.lastname@"

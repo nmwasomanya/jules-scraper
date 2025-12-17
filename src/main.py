@@ -132,9 +132,14 @@ class ScraperManager:
                 # Use deep crawling
                 data = await self.scraper.crawl_website(session, url)
 
-                if data['emails'] or data['facebook']:
+                # Check if we found anything useful
+                has_emails = bool(data.get('emails'))
+                has_socials = bool(data.get('socials'))
+
+                if has_emails or has_socials:
                     self.stats['success'] += 1
-                    self.stats['emails_found'] += len(data['emails'])
+                    if has_emails:
+                        self.stats['emails_found'] += len(data['emails'])
                 elif data:
                     # Consider it a success if we crawled successfully even without finding data
                     self.stats['success'] += 1
@@ -152,24 +157,24 @@ class ScraperManager:
                 self.stats['total'] += 1
 
     def process_results(self, original_row: pd.Series, data: dict):
-        emails = list(data['emails'])
-        facebook_links = list(data['facebook'])
+        emails = list(data.get('emails', []))
+        social_links = list(data.get('socials', []))
 
-        fb_str = ', '.join(facebook_links)
+        socials_str = ', '.join(social_links)
 
         # Row Explosion Logic
         if not emails:
             # No emails found
             new_row = original_row.to_dict()
             new_row['Extracted Emails'] = ''
-            new_row['Facebook Links'] = fb_str
+            new_row['Social Links'] = socials_str
             self.temp_not_found.append(new_row)
         else:
             # Multiple emails: multiple rows
             for email in emails:
                 new_row = original_row.to_dict()
                 new_row['Extracted Emails'] = email
-                new_row['Facebook Links'] = fb_str
+                new_row['Social Links'] = socials_str
                 self.temp_found.append(new_row)
 
     def flush_results(self):
