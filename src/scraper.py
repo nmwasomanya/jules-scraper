@@ -10,6 +10,7 @@ from fake_useragent import UserAgent
 import time
 from typing import List, Set, Dict, Tuple, Optional
 from utils import log_filtered_item, normalize_url
+from email_validator import validate_email, EmailNotValidError
 
 class AsyncScraper:
     def __init__(self, config: dict, filters: dict, proxies: List[str] = None):
@@ -61,23 +62,31 @@ class AsyncScraper:
         return True, ""
 
     def is_valid_email(self, email: str) -> Tuple[bool, str]:
-        """Check if email is valid based on filters."""
-        email_lower = email.lower()
+        """Check if email is valid based on filters and syntax."""
 
-        # Basic validation
+        # 1. Basic length check
         if len(email) > 100: return False, "Too long"
 
-        # Check prefixes
+        # 2. Syntax and Deliverability check using email-validator
+        try:
+            v = validate_email(email, check_deliverability=False) # check_deliverability=False for speed/avoid network
+            email = v.normalized
+        except EmailNotValidError as e:
+            return False, str(e)
+
+        email_lower = email.lower()
+
+        # 3. Check prefixes
         for prefix in self.filters.get('skip_email_prefixes', []):
             if email_lower.startswith(prefix):
                 return False, f"Excluded prefix: {prefix}"
 
-        # Check domains
+        # 4. Check domains (Junk Domains)
         domain = email_lower.split('@')[-1]
         if domain in self.filters.get('skip_email_domains', []):
             return False, f"Excluded domain: {domain}"
 
-        # Check patterns
+        # 5. Check patterns
         for pattern in self.filters.get('skip_email_patterns', []):
             if pattern in email_lower:
                 return False, f"Excluded pattern: {pattern}"
@@ -147,9 +156,9 @@ class AsyncScraper:
         return text
 
     def extract_data(self, html: str, base_url: str) -> Dict[str, Set[str]]:
-        """Extract emails, Facebook links, and new candidate links from HTML."""
+        """Extract emails, Facebook/Social links, and new candidate links from HTML."""
         if not html:
-            return {'emails': set(), 'facebook': set(), 'links': set()}
+            return {'emails': set(), 'socials': set(), 'links': set(), 'priority_links': set()}
 
         soup = BeautifulSoup(html, 'lxml')
 
@@ -188,13 +197,15 @@ class AsyncScraper:
             else:
                 log_filtered_item("Email", email, reason)
 
-        # 2. Extract Facebook Links & Candidate Links
-        facebook_links = set()
+        # 2. Extract Social Links & Candidate Links
+        social_links = set()
         candidate_links = set()
+        priority_links = set()
 
         follow_platforms = self.config.get('booking_platforms_follow', [])
         skip_platforms = self.config.get('booking_platforms_skip', [])
         keywords = self.config.get('link_keywords', [])
+        blacklisted = self.config.get('blacklisted_domains', [])
 
         base_domain = self.get_base_domain(base_url)
 
@@ -208,29 +219,50 @@ class AsyncScraper:
             absolute_url = normalize_url(absolute_url)
             link_base_domain = self.get_base_domain(absolute_url)
 
-            # Facebook
-            if 'facebook.com' in absolute_url or 'fb.com' in absolute_url:
-                 if 'share' not in absolute_url and 'sharer' not in absolute_url:
-                     facebook_links.add(absolute_url)
+            # Check if it is a blacklisted domain (e.g. facebook, instagram)
+            is_blacklisted = False
+            for bl_domain in blacklisted:
+                if bl_domain in absolute_url:
+                     # Check if it is a share link (usually we skip those)
+                     if 'share' not in absolute_url and 'sharer' not in absolute_url:
+                        social_links.add(absolute_url)
+                     is_blacklisted = True
+                     break
+
+            if is_blacklisted:
+                continue
 
             # Booking Platforms
             if any(p in absolute_url for p in follow_platforms):
-                candidate_links.add(absolute_url)
+                # Prioritize booking platforms
+                priority_links.add(absolute_url)
+                continue
             elif any(p in absolute_url for p in skip_platforms):
                 # Just log, don't follow
                 logging.info(f"Booking platform detected but skipped: {absolute_url}")
+                continue
 
-            # Internal Links with Keywords
+            # Internal Links with Smart Discovery
             # Must be same domain (ignoring www)
             if link_base_domain == base_domain:
                  lower_href = href.lower()
-                 if any(kw in lower_href for kw in keywords):
+                 link_text = link.get_text().lower()
+
+                 # Smart Link Discovery: Check both href and text for keywords
+                 is_priority = False
+                 if any(kw in lower_href for kw in keywords) or any(kw in link_text for kw in keywords):
+                     is_priority = True
+
+                 if is_priority:
+                     priority_links.add(absolute_url)
+                 else:
                      candidate_links.add(absolute_url)
 
         return {
             'emails': valid_emails,
-            'facebook': facebook_links,
-            'links': candidate_links
+            'socials': social_links,
+            'links': candidate_links,
+            'priority_links': priority_links
         }
 
     async def crawl_website(self, session: aiohttp.ClientSession, start_url: str) -> Dict[str, Set[str]]:
@@ -248,16 +280,15 @@ class AsyncScraper:
         visited = set()
         queue = [start_url]
 
-        # Add priority paths
+        # Add initial priority paths
         priority_paths = self.config.get('priority_paths', [])
-        # Ensure start_url doesn't have trailing slash for path appending
         clean_start = start_url.rstrip('/')
         for path in priority_paths:
             if not path.startswith('/'): path = '/' + path
             queue.append(normalize_url(clean_start + path))
 
         all_emails = set()
-        all_facebook = set()
+        all_socials = set()
         pages_crawled = 0
 
         start_time = time.time()
@@ -269,12 +300,20 @@ class AsyncScraper:
 
             current_url = queue.pop(0)
 
-            # Normalize again just in case, though they should be normalized when added
             current_url = normalize_url(current_url)
 
             if current_url in visited:
                 continue
             visited.add(current_url)
+
+            # Final check against blacklisted domains before crawling
+            should_skip = False
+            for bl in self.config.get('blacklisted_domains', []):
+                if bl in current_url:
+                    should_skip = True
+                    break
+            if should_skip:
+                continue
 
             logging.debug(f"Crawling {current_url} ({pages_crawled+1}/{max_pages})")
 
@@ -284,30 +323,31 @@ class AsyncScraper:
             if html:
                 data = self.extract_data(html, current_url)
                 all_emails.update(data['emails'])
-                all_facebook.update(data['facebook'])
+                all_socials.update(data['socials'])
 
                 if len(all_emails) >= max_emails:
                     logging.info(f"Reached max emails ({max_emails}) for {base_domain}")
                     break
 
                 # Add new discovered links to queue
-                for link in data['links']:
-                    # link is already normalized in extract_data
 
+                # 1. Add Priority Links (Smart Discovery & Booking) to FRONT
+                # We add them in reverse order so the first one stays first
+                for link in reversed(list(data['priority_links'])):
+                     if link not in visited and link not in queue:
+                         queue.insert(0, link)
+
+                # 2. Add Normal Links to BACK
+                for link in data['links']:
                     if link not in visited and link not in queue:
                         # Safety check: ensure we don't crawl infinite external sites
                         link_base_domain = self.get_base_domain(link)
                         is_same_domain = link_base_domain == base_domain
-                        is_booking = any(p in link for p in self.config.get('booking_platforms_follow', []))
 
-                        if is_booking:
-                             # Prioritize booking platforms
-                             queue.insert(0, link)
-                        elif is_same_domain:
+                        if is_same_domain:
                             queue.append(link)
-                        # Else: external link that is not a booking platform -> ignore
 
         return {
             'emails': all_emails,
-            'facebook': all_facebook
+            'socials': all_socials
         }
