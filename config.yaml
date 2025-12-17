@@ -9,12 +9,12 @@ delay_between_requests_max: 0.8
 max_retries_per_url: 1
 
 # Proxy Settings
-use_proxies: true
+use_proxies: false
 proxy_file: "proxies.txt"
 
 # Crawling Settings
 max_pages_per_domain: 15
-max_emails_per_domain: 1
+max_emails_per_domain: 10
 smart_stopping_enabled: false
 
 # Input/Output
