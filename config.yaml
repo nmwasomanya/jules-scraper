@@ -65,23 +65,24 @@ priority_paths:
   - "/get-in-touch"
   - "/reach-us"
 
-# Link Discovery Keywords
+# Link Discovery Keywords (Smart Link Discovery)
 link_keywords:
   - "contact"
   - "about"
   - "team"
+  - "staff"
   - "reach"
   - "book"
   - "appointment"
   - "schedule"
 
-# Booking Platforms
+# Booking Platforms (These should be visited and scraped)
 booking_platforms_follow:
   - "square.site"
   - "calendly.com"
   - "acuityscheduling.com"
   - "setmore.com"
 
+# Booking Platforms to Skip (Use Blacklisted Domains for general exclusion)
 booking_platforms_skip:
-  - "booksy.com"
   - "vagaro.com"

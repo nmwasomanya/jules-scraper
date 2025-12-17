@@ -69,10 +69,15 @@ class AsyncScraper:
 
         # 2. Syntax and Deliverability check using email-validator
         try:
-            v = validate_email(email, check_deliverability=False) # check_deliverability=False for speed/avoid network
+            # check_deliverability=True performs DNS checks (as requested by user)
+            v = validate_email(email, check_deliverability=True)
             email = v.normalized
         except EmailNotValidError as e:
+            # Optionally log the reason
             return False, str(e)
+        except Exception as e:
+            # Handle other potential errors (like DNS timeout if not handled by library)
+            return False, f"Validation error: {str(e)}"
 
         email_lower = email.lower()
 
